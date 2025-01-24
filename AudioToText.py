@@ -3,9 +3,6 @@ from moviepy.video.io.VideoFileClip import VideoFileClip
 from datetime import datetime
 import spacy
 import re
-from transformers import pipeline
-
-# ------------------------ set up --------------------------#
 
 # Initialize recognizer
 r = sr.Recognizer()
@@ -16,18 +13,6 @@ nlp = spacy.load('en_core_web_sm')
 filler_words = ["um", "uh", "like", "you know", "actually", "basically", 
                 "seriously", "literally", "honestly", "totally", "just", 
                 "right", "so", "okay", "well"]
-
-# Using a summarization model to generate an important summary
-summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
-
-# Or using a text classification model for important/unimportant classification
-classifier = pipeline("zero-shot-classification", model="facebook/bart-large-mnli")
-
-def summarize_text(text):
-    summary = summarizer(text, max_length=200, min_length=50, do_sample=False)
-    return summary[0]['summary_text']
-
-# -------------------- get audio from video ----------------------#
 
 def extract_audio_from_video(video_file_path, output_audio_path):
     try:
@@ -42,8 +27,6 @@ def extract_audio_from_video(video_file_path, output_audio_path):
     except Exception as e:
         print(f"Error extracting audio: {e}")
         return None
-
-# ------------------------ process audio --------------------------#
 
 def process_audio_file(audio_file_path):
     try:
@@ -61,8 +44,6 @@ def process_audio_file(audio_file_path):
     except sr.UnknownValueError:
         print("Google Speech Recognition could not understand the audio")
 
-# ------------------------ create transcript --------------------------#
-
 def output_text(text, suffix):
     # Generate a unique filename using the current timestamp
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -74,8 +55,6 @@ def output_text(text, suffix):
     
     print(f"Text written to {filename}")
     return filename
-
-# ------------------------ remove filler --------------------------#
 
 def remove_filler_words_with_pos(text):
     doc = nlp(text)
@@ -115,53 +94,12 @@ def remove_repeated_phrases_from_text(text):
             seen.add(word)
     
     return ' '.join(result)
-    
-# ----------------- remove unimportant content -------------------#
-
-def split_into_chunks(text, chunk_size=500):
-    # Split the text into smaller chunks to feed into the model
-    sentences = re.split(r'(?<!\w\.\w.)(?<![A-Z][a-z]\.)(?<=\.|\?)\s', text)
-    chunks = []
-    chunk = ""
-    
-    for sentence in sentences:
-        if len(chunk + sentence) > chunk_size:
-            chunks.append(chunk)
-            chunk = sentence
-        else:
-            chunk += " " + sentence
-
-    if chunk:  # Add remaining text
-        chunks.append(chunk)
-    
-    return chunks
-
-def filter_unimportant_sections(text):
-    chunks = split_into_chunks(text)
-    important_chunks = []
-    
-    for chunk in chunks:
-        # Summarization method
-        summary = summarize_text(chunk)
-        important_chunks.append(summary)
-        
-        # Classification method (if you prefer classification)
-        # result = classifier(chunk, candidate_labels=["important", "unimportant"])
-        # if result['labels'][0] == "important":
-        #     important_chunks.append(chunk)
-    
-    # Combine all important chunks back into a single string
-    return " ".join(important_chunks)
-
-# --------------------- file paths -----------------------#
 
 # Provide the path to your video file here
 video_file_path = r"C:\Users\Robert\Documents\UniProject\Python\video\project1.mp4"
 
 # Provide the path to your audio file here
 audio_file_path = r"C:\Users\Robert\Documents\UniProject\Python\audio\test.wav"
-
-# --------------------- apply code -----------------------#
 
 # Extract audio from the video file
 extracted_audio = extract_audio_from_video(video_file_path, audio_file_path)
@@ -179,10 +117,7 @@ if extracted_audio:
         # Step 2: Remove repetitions and phrases
         cleaned_text_no_repetition = remove_repetition_and_phrases(cleaned_text)
         
-        filtered_text = filter_unimportant_sections(cleaned_text_no_repetition)
-        
         output_text(cleaned_text_no_repetition, "cleaned")
-        output_text(filtered_text, "filtered")
         
         print("Recognized Text:", recognized_text)
         print("Cleaned Text:", cleaned_text_no_repetition)
