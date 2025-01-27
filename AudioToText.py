@@ -1,8 +1,10 @@
 import speech_recognition as sr
 from moviepy.video.io.VideoFileClip import VideoFileClip
+from moviepy import VideoFileClip, concatenate_videoclips
 from datetime import datetime
 import spacy
-import re
+import whisper
+
 
 # Initialize recognizer
 r = sr.Recognizer()
@@ -29,20 +31,23 @@ def extract_audio_from_video(video_file_path, output_audio_path):
         return None
 
 def process_audio_file(audio_file_path):
-    try:
-        # Load the audio file
-        with sr.AudioFile(audio_file_path) as source:
-            # Prepare recognizer to process the file
-            audio_data = r.record(source)
+    # Load the Whisper model (you can choose 'tiny', 'base', 'small', 'medium', or 'large')
+    model = whisper.load_model("base")  # Adjust the model size as needed
 
-            # Use Google to recognize audio
-            MyText = r.recognize_google(audio_data)
+    # Transcribe the audio file
+    result = model.transcribe(audio_file_path)
 
-            return MyText
-    except sr.RequestError as e:
-        print("Could not request results; {0}".format(e))
-    except sr.UnknownValueError:
-        print("Google Speech Recognition could not understand the audio")
+    # Extract the transcript and timestamps
+    segments = []
+    for segment in result["segments"]:
+        segments.append({
+            "text": segment["text"],
+            "start": segment["start"],
+            "end": segment["end"]
+        })
+    
+    print(f"Transcription completed. Text: {result['text'][:100]}...")  # Print a snippet of the transcription
+    return segments
 
 def output_text(text, suffix):
     # Generate a unique filename using the current timestamp
@@ -95,6 +100,22 @@ def remove_repeated_phrases_from_text(text):
     
     return ' '.join(result)
 
+def filter_segments(segments, cleaned_text):
+    filtered_segments = []
+    for segment in segments:
+        if any(cleaned_sentence in segment['text'] for cleaned_sentence in cleaned_text.split('.')):
+            filtered_segments.append(segment)
+    return filtered_segments
+
+def cut_video(video_path, segments, output_path):
+    video = VideoFileClip(video_path)
+    clips = []
+    for segment in segments:
+        clip = video.subclip(segment['start'], segment['end'])
+        clips.append(clip)
+    final_clip = concatenate_videoclips(clips)
+    final_clip.write_videofile(output_path, codec="libx264")
+
 # Provide the path to your video file here
 video_file_path = r"C:\Users\Robert\Documents\UniProject\Python\video\project1.mp4"
 
@@ -104,20 +125,28 @@ audio_file_path = r"C:\Users\Robert\Documents\UniProject\Python\audio\test.wav"
 # Extract audio from the video file
 extracted_audio = extract_audio_from_video(video_file_path, audio_file_path)
 
+# Process the extracted audio with Whisper
 if extracted_audio:
-    # Process the extracted audio file
-    recognized_text = process_audio_file(extracted_audio)
+    # Recognize audio with timestamps using Whisper
+    segments = process_audio_file(extracted_audio)
 
-    if recognized_text:
-        output_text(recognized_text, "original")
-        
-        # Step 1: Remove filler words
-        cleaned_text = remove_filler_words_with_pos(recognized_text)
-        
-        # Step 2: Remove repetitions and phrases
-        cleaned_text_no_repetition = remove_repetition_and_phrases(cleaned_text)
-        
-        output_text(cleaned_text_no_repetition, "cleaned")
-        
-        print("Recognized Text:", recognized_text)
-        print("Cleaned Text:", cleaned_text_no_repetition)
+    # Reconstruct the recognized text
+    recognized_text = ' '.join([seg['text'] for seg in segments])
+
+    # Output original transcription
+    output_text(recognized_text, "original")
+
+    # Clean text
+    cleaned_text = remove_filler_words_with_pos(recognized_text)
+    cleaned_text_no_repetition = remove_repetition_and_phrases(cleaned_text)
+
+    # Output cleaned transcription
+    output_text(cleaned_text_no_repetition, "cleaned")
+
+    # Filter segments based on cleaned text
+    filtered_segments = filter_segments(segments, cleaned_text_no_repetition)
+
+    # Cut video based on filtered segments
+    cut_video(video_file_path, filtered_segments, r"C:\Users\Robert\Documents\UniProject\Python\video\output.mp4")
+
+    print("Video trimmed successfully.")
