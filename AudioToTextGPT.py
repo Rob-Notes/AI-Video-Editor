@@ -1,11 +1,15 @@
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, ttk, PhotoImage, simpledialog
 from moviepy import VideoFileClip, concatenate_videoclips
 import whisper
 import threading
 from openai import OpenAI
+from PIL import Image, ImageTk
+import os
+import subprocess
 
 #initialise whisper model
+os.environ["WHISPER_PROGRESS"] = "0"
 whisperModel = whisper.load_model("base")
 
 #filler word list
@@ -143,64 +147,305 @@ def editVideo(video_clip, segmentsToRemove):
     finalClip = concatenate_videoclips(clipsToKeep)
     return finalClip
 
+def preprocessVideo(inputPath, outputFolder="temp"):
+    os.makedirs(outputFolder, exist_ok=True)
+    outputPath = os.path.join(outputFolder, "compressed.mp4")
+    
+    ffmpegCMD = [
+        "ffmpeg",
+        "-i", inputPath,
+        "-vf", f"scale={compressionSettings['width']}:-2",
+        "-r", str(compressionSettings['fps']),
+        "-c:v", "libx264",
+        "-preset", compressionSettings["preset"],
+        "-crf", str(compressionSettings['crf']),
+        "-c:a", "aac",
+        "-b:a", "64k",
+        "-y",
+        "-loglevel", "error",
+        outputPath
+    ]
+    
+    try:
+        subprocess.run(ffmpegCMD, check=True)
+        return outputPath
+    except subprocess.CalledProcessError as e:
+        messagebox.showerror("FFmpeg Error", f"Failed to compress video: {e}")
+        return None
+    
 #function to process video
-def process_video():
+def processVideo():
     global video_clip
     videoFilePath = filedialog.askopenfilename(title="Select Video File", filetypes=[("Video Files", "*.mp4 *.avi *.mov")])
     if not videoFilePath:
         return
 
-    #update status
-    status_label.config(text="Extracting audio...")
-    progress_bar.start()
+    try:
+        #setup progress
+        progressBar["value"] = 0
+        root.update_idletasks()
 
-    #extract audio
-    audioFilePath = "temp_audio.wav"
-    extractedAudio = extractAudio(videoFilePath, audioFilePath)
+        #compress video
+        statusLabel.config(text="Compressing video...")
+        progressBar["value"] = 20
+        compressedPath = preprocessVideo(videoFilePath)
+        if not compressedPath:
+            return
+        
+        #load compressed video
+        statusLabel.config(text="Loading video...")
+        progressBar["value"] = 30
+        video_clip = VideoFileClip(compressedPath)
 
-    if extractedAudio:
-        #transcribe audio
-        status_label.config(text="Transcribing audio...")
-        transcript, timestamps = transcribeAudio(extractedAudio)
+        #extract audio
+        statusLabel.config(text="Extracting audio...")
+        progressBar["value"] = 40
+        audioFilePath = "temp_audio.wav"
+        if not extractAudio(compressedPath, audioFilePath):
+            return
 
-        #identify unimportant segments
-        status_label.config(text="Identifying unimportant segments...")
-        video_clip = VideoFileClip(videoFilePath)
+        #transcribe
+        statusLabel.config(text="Transcribing audio...")
+        progressBar["value"] = 50
+        transcript, timestamps = transcribeAudio(audioFilePath)
+
+        #process video
+        statusLabel.config(text="Identifying segments...")
+        progressBar["value"] = 70
         segmentsToRemove = identifyOtherUnimportantSegments(timestamps, transcript, buffer=0.1)
 
-        #edit video
-        status_label.config(text="Editing video...")
+        statusLabel.config(text="Editing video...")
+        progressBar["value"] = 80
         finalClip = editVideo(video_clip, segmentsToRemove)
 
-        #save edited video
-        outputVideoPath = filedialog.asksaveasfilename(title="Save Edited Video", defaultextension=".mp4", filetypes=[("Video Files", "*.mp4")])
+        #save
+        statusLabel.config(text="Saving video...")
+        progressBar["value"] = 90
+        outputVideoPath = filedialog.asksaveasfilename(
+            title="Save Edited Video",
+            defaultextension=".mp4",
+            filetypes=[("Video Files", "*.mp4")]
+        )
         if outputVideoPath:
-            finalClip.write_videofile(outputVideoPath, codec="libx264")
-            status_label.config(text="Video saved successfully!")
+            finalClip.write_videofile(
+                outputVideoPath,
+                codec="libx264",
+                audio_codec="aac",
+                threads=4 
+            )
+            statusLabel.config(text="Video saved successfully!")
             messagebox.showinfo("Success", f"Edited video saved to: {outputVideoPath}")
 
-    progress_bar.stop()
-    status_label.config(text="Ready")
+    except Exception as e:
+        messagebox.showerror("Error", f"Processing failed: {str(e)}")
+    finally:
+        #cleanup temporary files
+        temp_files = [compressedPath, audioFilePath]
+        for file in temp_files:
+            if file and os.path.exists(file):
+                try:
+                    os.remove(file)
+                except:
+                    pass
+        
+        progressBar["value"] = 100
+        statusLabel.config(text="Ready")
+        root.update_idletasks()
 
 #function to use threading
 def startProcessing():
-    threading.Thread(target=process_video).start()
+    threading.Thread(target=processVideo).start()
+
+class ToolTip:
+    def __init__(self, widget, text):
+        self.widget = widget
+        self.text = text
+        self.tipwindow = None
+        self.widget.bind("<Enter>", self.show)
+        self.widget.bind("<Leave>", self.hide)
+
+    def show(self, event=None):
+        x, y, _, _ = self.widget.bbox("insert")
+        x += self.widget.winfo_rootx() + 25
+        y += self.widget.winfo_rooty() + 25
+        self.tipwindow = tk.Toplevel(self.widget)
+        self.tipwindow.wm_overrideredirect(True)
+        self.tipwindow.wm_geometry(f"+{x}+{y}")
+        label = tk.Label(self.tipwindow, text=self.text, bg="#ffffe0", 
+                        relief=tk.SOLID, borderwidth=1, padx=5, pady=5)
+        label.pack()
+
+    def hide(self, event=None):
+        if self.tipwindow:
+            self.tipwindow.destroy()
+
+def openSettings():
+    settingsWindow = tk.Toplevel(root)
+    settingsWindow.title("Compression Settings")
+    settingsWindow.geometry("400x350")
+    settingsWindow.resizable(False, False)
+    
+    # Main container frame for better spacing
+    main_frame = tk.Frame(settingsWindow, padx=20, pady=20)
+    main_frame.pack(fill=tk.BOTH, expand=True)
+    
+    def validate_number(input_str, min_val, max_val):
+        """Helper function to validate numeric inputs"""
+        try:
+            value = int(input_str)
+            return min_val <= value <= max_val
+        except ValueError:
+            return False
+
+    # Resolution
+    tk.Label(main_frame, text="Resolution Width (px):").grid(row=0, column=0, sticky="w", pady=(0,5))
+    resVar = tk.StringVar(value=str(compressionSettings["width"]))
+    res_entry = tk.Entry(main_frame, textvariable=resVar)
+    res_entry.grid(row=0, column=1, sticky="ew", pady=(0,5))
+    ToolTip(res_entry, "Recommended: 480-1280 (lower=faster processing)")
+
+    # Frame Rate
+    tk.Label(main_frame, text="Frame Rate (FPS):").grid(row=1, column=0, sticky="w", pady=(0,5))
+    fpsVar = tk.StringVar(value=str(compressionSettings["fps"]))
+    fps_entry = tk.Entry(main_frame, textvariable=fpsVar)
+    fps_entry.grid(row=1, column=1, sticky="ew", pady=(0,5))
+    ToolTip(fps_entry, "Recommended: 15-30 (lower=faster processing)")
+
+    # Compression Level
+    tk.Label(main_frame, text="Compression Quality:").grid(row=2, column=0, sticky="w", pady=(0,5))
+    crfVar = tk.IntVar(value=compressionSettings["crf"])
+    tk.Scale(main_frame, from_=0, to=51, orient=tk.HORIZONTAL, variable=crfVar,
+            showvalue=1).grid(row=2, column=1, sticky="ew", pady=(0,5))
+    tk.Label(main_frame, text="0=lossless, 23=high, 28=medium, 51=lowest").grid(
+        row=3, column=1, sticky="w", pady=(0,10))
+
+    # Preset
+    tk.Label(main_frame, text="Encoding Speed:").grid(row=4, column=0, sticky="w", pady=(0,5))
+    presetVar = tk.StringVar(value=compressionSettings["preset"])
+    preset_menu = tk.OptionMenu(main_frame, presetVar, 
+                              "ultrafast", "superfast", "veryfast", 
+                              "faster", "fast", "medium")
+    preset_menu.grid(row=4, column=1, sticky="ew", pady=(0,10))
+    ToolTip(preset_menu, "Faster encoding = larger files")
+
+    # Button frame
+    btn_frame = tk.Frame(main_frame)
+    btn_frame.grid(row=5, column=0, columnspan=2, pady=(10,0))
+
+    def saveSettings():
+        try:
+            # Validate inputs
+            if not all([
+                validate_number(resVar.get(), 160, 3840),
+                validate_number(fpsVar.get(), 1, 120),
+                validate_number(crfVar.get(), 0, 51)
+            ]):
+                raise ValueError("Invalid settings values")
+            
+            # Save settings
+            compressionSettings.update({
+                "width": int(resVar.get()),
+                "fps": int(fpsVar.get()),
+                "crf": int(crfVar.get()),
+                "preset": presetVar.get()
+            })
+            settingsWindow.destroy()
+            
+        except Exception as e:
+            messagebox.showerror("Invalid Settings", f"Please check your values:\n{str(e)}")
+
+    tk.Button(btn_frame, text="Save", command=saveSettings, width=10).pack(side=tk.LEFT, padx=5)
+    tk.Button(btn_frame, text="Reset", command=lambda: [
+        resVar.set("640"), fpsVar.set("15"), 
+        crfVar.set(28), presetVar.set("fast")
+    ], width=10).pack(side=tk.LEFT, padx=5)
+    tk.Button(btn_frame, text="Cancel", command=settingsWindow.destroy, width=10).pack(side=tk.LEFT, padx=5)
+
+    # Make columns resizable
+    main_frame.columnconfigure(1, weight=1)
 
 #create main window
 root = tk.Tk()
 root.title("Video Editor")
-root.geometry("400x200")
+root.geometry("1280x720")
+root.configure(bg="#96adc8")
 
-#add button to select and process video
-process_button = tk.Button(root, text="Select Video and Edit", command=startProcessing)
-process_button.pack(pady=20)
+compressionSettings = {
+    "width": 640,
+    "fps": 15,
+    "crf": 28,
+    "preset": "fast"
+}
+
+#add logo
+try:
+    logoImage = Image.open("C://Users//Robert//Documents//UniProject//Python//AI-Video-Editor//pics//logo.png")
+    logoImage = logoImage.resize((100, 100), Image.LANCZOS)
+    logo = ImageTk.PhotoImage(logoImage)
+
+    logoLabel = tk.Label(root, image=logo, bg="#96adc8")
+    logoLabel.place(x=10, y=10)
+except Exception as e:
+    print(f"Error loading logo: {e}")
+    
+
+#create centre frame
+centerFrame = tk.Frame(root, bg="#96adc8")
+centerFrame.pack(pady=(100, 0))
+
+#add name image
+try:
+    nameImage = Image.open("C://Users//Robert//Documents//UniProject//Python//AI-Video-Editor//pics//name.png")
+    nameImage = nameImage.resize((300, 100), Image.LANCZOS)
+    namePhoto = ImageTk.PhotoImage(nameImage)
+    
+    name_label = tk.Label(centerFrame, image=namePhoto, bg="#96adc8")
+    name_label.image = namePhoto
+    name_label.pack(pady=(0, 10))
+except Exception as e:
+    print(f"Error loading name image: {e}")
+
+#add subtitle
+subtitle = tk.Label(centerFrame, 
+                   text="Professional Video Editor", 
+                   bg="#96adc8", 
+                   fg="#05154e",
+                   font=("Arial", 12, "italic"))
+subtitle.pack()
+
+
+#frame for both buttons
+button_frame = tk.Frame(root, bg="#96adc8")
+button_frame.pack(pady=20)
+
+#process button
+processButton = tk.Button(
+    button_frame, 
+    text="Select Video and Edit", 
+    command=startProcessing, 
+    bg="#00a676",
+    padx=15,
+    pady=5
+)
+processButton.pack(side=tk.LEFT, padx=(0, 10))
+
+#settings button
+settingsButton = tk.Button(
+    button_frame, 
+    text="Settings", 
+    command=openSettings,
+    bg="#f0f0f0",
+    padx=15,
+    pady=5
+)
+settingsButton.pack(side=tk.LEFT)
 
 #add progress bar
-progress_bar = ttk.Progressbar(root, orient="horizontal", length=300, mode="determinate")
-progress_bar.pack(pady=10)
+progressBar = ttk.Progressbar(root, orient="horizontal", length=300, mode="determinate")
+progressBar.pack(pady=10)
 
 #add status label
-status_label = tk.Label(root, text="Ready", fg="blue")
-status_label.pack(pady=10)
+statusLabel = tk.Label(root, text="Ready", bg="#96adc8", fg="#05154e")
+statusLabel.pack(pady=10)
 
 root.mainloop()
