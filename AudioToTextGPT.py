@@ -7,6 +7,7 @@ from openai import OpenAI
 from PIL import Image, ImageTk
 import os
 import subprocess
+import spacy
 
 #initialise whisper model
 os.environ["WHISPER_PROGRESS"] = "0"
@@ -15,8 +16,11 @@ whisperModel = whisper.load_model("base")
 #filler word list
 fillerWords = ["um", "uh", "like", "you know", "actually", "basically", "seriously", "literally"]
 
+nlp = spacy.load("en_core_web_sm")
+
 #initialise openai client
 openAIClient = OpenAI(api_key="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")  
+
 #function to extract audio from video
 def extractAudio(videoFilePath, audioOutputPath):
     try:
@@ -57,6 +61,14 @@ def detectRepetition(transcript, timestamps, minPhraseLength=3):
         phraseEnd = timestamps[end2 - 1]["end"]
         segmentsToRemove.append((phraseStart, phraseEnd))
     return segmentsToRemove
+
+def isFiller(word, transcript):
+    doc = nlp(transcript)
+    for token in doc:
+        if token.text.lower() == word.lower():
+            if token.pos_ == "INTJ" or (token.i > 0 and doc[token.i-1].text in {",", "...", "—"}):
+                return True
+    return False
 
 #function to identify unimportant segments using chatgpt
 def identifyUnimportantContentChatGPT(transcript, timestamps):
@@ -112,10 +124,12 @@ def identifyOtherUnimportantSegments(timestamps, transcript, buffer=0.1):
     
     #remove filler words
     for entry in timestamps:
-        if entry["word"].lower() in fillerWords:  #check if word is filler
-            wordStart = max(0, entry["start"] - buffer)
-            wordEnd = entry["end"] + buffer
-            segmentsToRemove.append((wordStart, wordEnd))
+        word = entry["word"].lower()
+        if word in fillerWords:  #check if word is filler
+            if isFiller(word, transcript):
+                wordStart = max(0, entry["start"] - buffer)
+                wordEnd = entry["end"] + buffer
+                segmentsToRemove.append((wordStart, wordEnd))
     
     #add segment after last word
     if lastWordEndTime < video_clip.duration:
@@ -378,7 +392,7 @@ compressionSettings = {
 
 #add logo
 try:
-    logoImage = Image.open("C://Users//Robert//Documents//UniProject//Python//AI-Video-Editor//pics//logo.png")
+    logoImage = Image.open("D://final_project//pics//logo.png")
     logoImage = logoImage.resize((100, 100), Image.LANCZOS)
     logo = ImageTk.PhotoImage(logoImage)
 
@@ -394,7 +408,7 @@ centerFrame.pack(pady=(100, 0))
 
 #add name image
 try:
-    nameImage = Image.open("C://Users//Robert//Documents//UniProject//Python//AI-Video-Editor//pics//name.png")
+    nameImage = Image.open("D://final_project//pics//name.png")
     nameImage = nameImage.resize((300, 100), Image.LANCZOS)
     namePhoto = ImageTk.PhotoImage(nameImage)
     
