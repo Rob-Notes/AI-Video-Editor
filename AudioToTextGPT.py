@@ -75,7 +75,7 @@ def identifyUnimportantContentChatGPT(transcript, timestamps):
     
     #prepare prompt
     prompt = f"""
-    Below is a transcript of a video. Identify the timestamps of any unimportant content (e.g., tangents, off-topic discussions) that should be removed. 
+    Below is a transcript of a video. Identify the timestamps of any unimportant content (e.g., tangents, off-topic discussions, paraphrased repetitions) that should be removed. 
     Return the timestamps in the format: [(start1, end1), (start2, end2), ...].
 
     Transcript:
