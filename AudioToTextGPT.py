@@ -71,38 +71,77 @@ def isFiller(word, transcript):
     return False
 
 #function to identify unimportant segments using chatgpt
-def identifyUnimportantContentChatGPT(transcript, timestamps):
+def identifyUnimportantContentChatGPT(transcript, timestamps, maxTokens=12000):
     
-    #prepare prompt
-    prompt = f"""
-    Below is a transcript of a video. Identify the timestamps of any unimportant content (e.g., tangents, off-topic discussions, paraphrased repetitions) that should be removed. 
-    Return the timestamps in the format: [(start1, end1), (start2, end2), ...].
+    def splitTranscript(text, tokenLimit):
+        words = text.split()
+        chunks = []
+        currentChunk = []
+        currentCount = 0
+        
+        for word in words:
+            wordTokens = len(word) + 1 
+            if currentCount + wordTokens <= tokenLimit:
+                currentChunk.append(word)
+                currentCount += wordTokens
+            else:
+                chunks.append(" ".join(currentChunk))
+                currentChunk = [word]
+                currentCount = wordTokens
+        
+        if currentChunk:
+            chunks.append(" ".join(currentChunk))
+        return chunks
+    
+    allSegments = []
+    chunks = splitTranscript(transcript, maxTokens)
+    
+    for chunk in chunks:
+        #prepare prompt
+        prompt = f"""
+        Below is a transcript of a video. Identify the timestamps of any unimportant content (e.g., tangents, off-topic discussions, paraphrased repetitions) that should be removed. 
+        Return the timestamps in the format: [(start1, end1), (start2, end2), ...].
 
-    Transcript:
-    {transcript}
+        Transcript:
+        {chunk}
 
-    Timestamps:
-    {timestamps}
+        Timestamps:
+        {timestamps}
 
-    Return only the timestamps of unimportant content. Do not rephrase or summarize the transcript.
-    """
+        Return only the timestamps of unimportant content. Do not rephrase or summarize the transcript.
+        """
 
-    #send prompt to chatgpt
-    response = openAIClient.chat.completions.create(
-        model="gpt-3.5-turbo",
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=1000,
-    )
+        try:
+                response = openAIClient.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=1000,
+                )
+            
+                output = response.choices[0].message.content.strip()
+            
+                #safely evaluate response
+                if output.startswith("[(") and output.endswith(")]"):
+                    segments = eval(output)
+                    if all(isinstance(x, tuple) and len(x) == 2 for x in segments):
+                        allSegments.extend(segments)
+                    
+        except Exception as e:
+            print(f"Error processing chunk: {str(e)}")
+            continue
 
-    #get response
-    chatGPTOutput = response.choices[0].message.content.strip()
-
-    try:
-        segmentsToRemove = eval(chatGPTOutput)
-        return segmentsToRemove
-    except Exception as e:
-        print(f"Error parsing LLM output: {e}")
-        return []
+    if allSegments:
+        allSegments.sort()
+        merged = [allSegments[0]]
+        for current in allSegments[1:]:
+            last = merged[-1]
+            if current[0] <= last[1]:  
+                merged[-1] = (last[0], max(last[1], current[1]))
+            else:
+                merged.append(current)
+        return merged
+    
+    return []
 
 #function to identify unimportant segments
 def identifyOtherUnimportantSegments(timestamps, transcript, buffer=0.1):
