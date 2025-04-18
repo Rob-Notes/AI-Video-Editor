@@ -71,7 +71,7 @@ def isFiller(word, transcript):
     return False
 
 #function to identify unimportant segments using chatgpt
-def identifyUnimportantContentChatGPT(transcript, timestamps, maxTokens=12000):
+def identifyUnimportantContentChatGPT(transcript, timestamps, maxTokens=15000):
     
     def splitTranscript(text, tokenLimit):
         words = text.split()
@@ -200,6 +200,9 @@ def editVideo(video_clip, segmentsToRemove):
     return finalClip
 
 def preprocessVideo(inputPath, outputFolder="temp"):
+    if compressionSettings["no_compression"]:
+        return inputPath 
+    
     os.makedirs(outputFolder, exist_ok=True)
     outputPath = os.path.join(outputFolder, "compressed.mp4")
     
@@ -240,7 +243,11 @@ def processVideo():
         #compress video
         statusLabel.config(text="Compressing video...")
         progressBar["value"] = 20
-        compressedPath = preprocessVideo(videoFilePath)
+        if compressionSettings["no_compression"]:
+            compressedPath = videoFilePath
+        else:
+            compressedPath = preprocessVideo(videoFilePath)
+        
         if not compressedPath:
             return
         
@@ -292,7 +299,10 @@ def processVideo():
         messagebox.showerror("Error", f"Processing failed: {str(e)}")
     finally:
         #cleanup temporary files
-        temp_files = [compressedPath, audioFilePath]
+        temp_files = [audioFilePath]
+        if not compressionSettings["no_compression"]:
+            temp_files.append(compressedPath)
+
         for file in temp_files:
             if file and os.path.exists(file):
                 try:
@@ -334,86 +344,107 @@ class ToolTip:
 def openSettings():
     settingsWindow = tk.Toplevel(root)
     settingsWindow.title("Compression Settings")
-    settingsWindow.geometry("400x350")
+    settingsWindow.geometry("400x400")
     settingsWindow.resizable(False, False)
     
-    # Main container frame for better spacing
+    #main frame
     main_frame = tk.Frame(settingsWindow, padx=20, pady=20)
     main_frame.pack(fill=tk.BOTH, expand=True)
     
-    def validate_number(input_str, min_val, max_val):
-        """Helper function to validate numeric inputs"""
+    def validateNumber(input_str, min_val, max_val):
         try:
             value = int(input_str)
             return min_val <= value <= max_val
         except ValueError:
             return False
 
-    # Resolution
-    tk.Label(main_frame, text="Resolution Width (px):").grid(row=0, column=0, sticky="w", pady=(0,5))
+    #no compression checkbox
+    noCompVar = tk.IntVar(value=1 if compressionSettings["no_compression"] else 0)
+    no_comp_check = tk.Checkbutton(main_frame, text="No Compression (use original video)", 
+                                 variable=noCompVar, onvalue=1, offvalue=0)
+    no_comp_check.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0,10))
+    ToolTip(no_comp_check, "When checked, the original video will be used without any compression")
+
+    #resolution
+    tk.Label(main_frame, text="Resolution Width (px):").grid(row=1, column=0, sticky="w", pady=(0,5))
     resVar = tk.StringVar(value=str(compressionSettings["width"]))
     res_entry = tk.Entry(main_frame, textvariable=resVar)
-    res_entry.grid(row=0, column=1, sticky="ew", pady=(0,5))
+    res_entry.grid(row=1, column=1, sticky="ew", pady=(0,5))
     ToolTip(res_entry, "Recommended: 480-1280 (lower=faster processing)")
 
-    # Frame Rate
-    tk.Label(main_frame, text="Frame Rate (FPS):").grid(row=1, column=0, sticky="w", pady=(0,5))
+    #frame rate
+    tk.Label(main_frame, text="Frame Rate (FPS):").grid(row=2, column=0, sticky="w", pady=(0,5))
     fpsVar = tk.StringVar(value=str(compressionSettings["fps"]))
     fps_entry = tk.Entry(main_frame, textvariable=fpsVar)
-    fps_entry.grid(row=1, column=1, sticky="ew", pady=(0,5))
+    fps_entry.grid(row=2, column=1, sticky="ew", pady=(0,5))
     ToolTip(fps_entry, "Recommended: 15-30 (lower=faster processing)")
 
-    # Compression Level
-    tk.Label(main_frame, text="Compression Quality:").grid(row=2, column=0, sticky="w", pady=(0,5))
+    #compression Level
+    tk.Label(main_frame, text="Compression Quality:").grid(row=3, column=0, sticky="w", pady=(0,5))
     crfVar = tk.IntVar(value=compressionSettings["crf"])
-    tk.Scale(main_frame, from_=0, to=51, orient=tk.HORIZONTAL, variable=crfVar,
-            showvalue=1).grid(row=2, column=1, sticky="ew", pady=(0,5))
+    crf_scale = tk.Scale(main_frame, from_=0, to=51, orient=tk.HORIZONTAL, variable=crfVar,
+                       showvalue=1)
+    crf_scale.grid(row=3, column=1, sticky="ew", pady=(0,5))
     tk.Label(main_frame, text="0=lossless, 23=high, 28=medium, 51=lowest").grid(
-        row=3, column=1, sticky="w", pady=(0,10))
+        row=4, column=1, sticky="w", pady=(0,10))
 
-    # Preset
-    tk.Label(main_frame, text="Encoding Speed:").grid(row=4, column=0, sticky="w", pady=(0,5))
+    #preset
+    tk.Label(main_frame, text="Encoding Speed:").grid(row=5, column=0, sticky="w", pady=(0,5))
     presetVar = tk.StringVar(value=compressionSettings["preset"])
     preset_menu = tk.OptionMenu(main_frame, presetVar, 
                               "ultrafast", "superfast", "veryfast", 
                               "faster", "fast", "medium")
-    preset_menu.grid(row=4, column=1, sticky="ew", pady=(0,10))
+    preset_menu.grid(row=5, column=1, sticky="ew", pady=(0,10))
     ToolTip(preset_menu, "Faster encoding = larger files")
 
-    # Button frame
+    def toggleCompression():
+        state = "disabled" if noCompVar.get() == 1 else "normal"
+        res_entry.config(state=state)
+        fps_entry.config(state=state)
+        crf_scale.config(state=state)
+    
+        if state == "disabled":
+            preset_menu.config(state="disabled")
+        else:
+            preset_menu.config(state="normal")
+
+    #bind checkbox to toggle function
+    no_comp_check.config(command=toggleCompression)
+    
+    toggleCompression()
+
+    #button frame
     btn_frame = tk.Frame(main_frame)
-    btn_frame.grid(row=5, column=0, columnspan=2, pady=(10,0))
+    btn_frame.grid(row=6, column=0, columnspan=2, pady=(10,0))
 
     def saveSettings():
         try:
-            # Validate inputs
-            if not all([
-                validate_number(resVar.get(), 160, 3840),
-                validate_number(fpsVar.get(), 1, 120),
-                validate_number(crfVar.get(), 0, 51)
-            ]):
-                raise ValueError("Invalid settings values")
-            
             # Save settings
             compressionSettings.update({
                 "width": int(resVar.get()),
                 "fps": int(fpsVar.get()),
                 "crf": int(crfVar.get()),
-                "preset": presetVar.get()
+                "preset": presetVar.get(),
+                "no_compression": bool(noCompVar.get()) 
             })
             settingsWindow.destroy()
+            messagebox.showinfo("Success", "Settings saved successfully!")
             
         except Exception as e:
             messagebox.showerror("Invalid Settings", f"Please check your values:\n{str(e)}")
 
     tk.Button(btn_frame, text="Save", command=saveSettings, width=10).pack(side=tk.LEFT, padx=5)
     tk.Button(btn_frame, text="Reset", command=lambda: [
-        resVar.set("640"), fpsVar.set("15"), 
-        crfVar.set(28), presetVar.set("fast")
+        noCompVar.set(0),
+        resVar.set("640"), 
+        fpsVar.set("15"), 
+        crfVar.set(28), 
+        presetVar.set("fast"),
+        toggleCompression()
     ], width=10).pack(side=tk.LEFT, padx=5)
     tk.Button(btn_frame, text="Cancel", command=settingsWindow.destroy, width=10).pack(side=tk.LEFT, padx=5)
 
-    # Make columns resizable
+    #make columns resizable
     main_frame.columnconfigure(1, weight=1)
 
 #create main window
@@ -426,7 +457,8 @@ compressionSettings = {
     "width": 640,
     "fps": 15,
     "crf": 28,
-    "preset": "fast"
+    "preset": "fast",
+    "no_compression": False 
 }
 
 #add logo
