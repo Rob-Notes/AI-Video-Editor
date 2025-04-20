@@ -350,13 +350,6 @@ def openSettings():
     #main frame
     main_frame = tk.Frame(settingsWindow, padx=20, pady=20)
     main_frame.pack(fill=tk.BOTH, expand=True)
-    
-    def validateNumber(input_str, min_val, max_val):
-        try:
-            value = int(input_str)
-            return min_val <= value <= max_val
-        except ValueError:
-            return False
 
     #no compression checkbox
     noCompVar = tk.IntVar(value=1 if compressionSettings["no_compression"] else 0)
