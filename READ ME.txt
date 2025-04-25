@@ -1,0 +1,11 @@
+Instructions
+1.	Install Python and FFmpeg
+2.	Install all code libraries listed in requirements.txt
+3.	Download the pics folder
+4.	Replace the file directory on line 381 of AudioToTextGPT.py with the file directory of the pics folder
+a.	Tip: use “//” instead of “\”
+5.	Replace the file directory on line 397 of AudioToTextGPT.py with the file directory of the pics folder
+
+
+
+if my program explodes your computer, sorry
